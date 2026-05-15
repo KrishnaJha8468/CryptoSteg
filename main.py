@@ -880,4 +880,4 @@ if __name__ == "__main__":
 ╚══════════════════════════════════════════════════════╝
     """)
     app = CryptoStegApp()
-    app.run()
+    app.run()# Version: 3.0 - Military Grade Steganography Tool
