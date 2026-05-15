@@ -1,8 +1,3 @@
-"""
-CryptoSteg - Military Grade Steganography Tool
-Complete working version - Single file
-"""
-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
@@ -13,7 +8,6 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from Crypto.Random import get_random_bytes
 
-# ============== CORE CRYPTOGRAPHY ==============
 
 class AES256:
     def __init__(self):
@@ -38,8 +32,6 @@ class AES256:
         decrypted = cipher.decrypt(data[16:])
         return unpad(decrypted, AES.block_size).decode()
 
-
-# ============== LSB STEGANOGRAPHY ==============
 
 class LSB:
     END_MARKER = '1111111111111110'
@@ -79,8 +71,6 @@ class LSB:
         return None
 
 
-# ============== CAPACITY CHECKER ==============
-
 class Capacity:
     @staticmethod
     def check(image_path):
@@ -88,8 +78,6 @@ class Capacity:
         max_bytes = (img.size[0] * img.size[1] * 3) // 8 - 32
         return max(0, max_bytes)
 
-
-# ============== ENCODER ==============
 
 class Encoder:
     def __init__(self):
@@ -102,8 +90,6 @@ class Encoder:
         bytes_hidden = self.lsb.hide(image_path, encrypted, output_path)
         return bytes_hidden
 
-
-# ============== DECODER ==============
 
 class Decoder:
     def __init__(self):
@@ -122,7 +108,6 @@ class Decoder:
             return None, "Wrong password!"
 
 
-# ============== GUI STYLES ==============
 
 COLORS = {
     'bg': '#1a1a2e',
@@ -136,7 +121,6 @@ COLORS = {
 }
 
 
-# ============== ENCODE TAB ==============
 
 class EncodeTab(tk.Frame):
     def __init__(self, parent):
@@ -232,7 +216,6 @@ class EncodeTab(tk.Frame):
             messagebox.showerror("Error", str(e))
 
 
-# ============== DECODE TAB ==============
 
 class DecodeTab(tk.Frame):
     def __init__(self, parent):
@@ -305,8 +288,6 @@ class DecodeTab(tk.Frame):
             messagebox.showerror("Error", error)
 
 
-# ============== MAIN APP ==============
-
 class CryptoStegApp:
     def __init__(self):
         self.root = tk.Tk()
@@ -339,7 +320,6 @@ class CryptoStegApp:
         self.root.mainloop()
 
 
-# ============== RUN ==============
 
 if __name__ == "__main__":
     print("""

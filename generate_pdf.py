@@ -1,7 +1,3 @@
-"""
-Simple PDF Generator Test - Run this separately
-"""
-
 import os
 from datetime import datetime
 from reportlab.lib.pagesizes import letter

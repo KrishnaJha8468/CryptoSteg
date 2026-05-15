@@ -1,8 +1,3 @@
-"""
-CryptoSteg v3.0 - Ultimate Military Grade Steganography Tool
-Features: AES-256 + LSB Steganography + Detection + Logging + PDF Reports + Dark/Light Mode
-"""
-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
@@ -21,9 +16,6 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER
 
-# ============================================================
-#  CORE CRYPTOGRAPHY
-# ============================================================
 
 class AES256:
     def __init__(self):
@@ -48,10 +40,6 @@ class AES256:
         decrypted = cipher.decrypt(data[16:])
         return unpad(decrypted, AES.block_size).decode()
 
-
-# ============================================================
-#  LSB STEGANOGRAPHY
-# ============================================================
 
 class LSB:
     END_MARKER = '1111111111111110'
@@ -104,10 +92,6 @@ class LSB:
                 break
         return None
 
-
-# ============================================================
-#  STEG DETECTOR
-# ============================================================
 class StegDetector:
     @staticmethod
     def analyze(image_path):
@@ -144,11 +128,6 @@ class StegDetector:
             results['confidence'] = max(5, 100 - results['confidence'])
         return results
 
-
-# ============================================================
-#  ACTIVITY LOGGER
-# ============================================================
-
 class ActivityLogger:
     def __init__(self, log_file="logs/activity.json"):
         self.log_file = log_file
@@ -176,11 +155,6 @@ class ActivityLogger:
     def clear_logs(self):
         with open(self.log_file, 'w') as f:
             json.dump([], f)
-
-
-# ============================================================
-#  PDF REPORT GENERATOR
-# ============================================================
 
 class PDFReporter:
     @staticmethod
@@ -215,7 +189,7 @@ class PDFReporter:
             story = []
             
             # Header
-            story.append(Paragraph("🔐 CRYPTOSTEG v3.0", title_style))
+            story.append(Paragraph("CRYPTOSTEG v3.0", title_style))
             story.append(Paragraph("Military-Grade Steganography Report", subtitle_style))
             story.append(Spacer(1, 0.1*inch))
             story.append(Table([['']], colWidths=[7*inch], rowHeights=[2],
@@ -223,11 +197,11 @@ class PDFReporter:
             story.append(Spacer(1, 0.2*inch))
             
             # Report Metadata
-            story.append(Paragraph("📋 REPORT INFORMATION", section_style))
+            story.append(Paragraph("REPORT INFORMATION", section_style))
             info_data = [
-                ["📅 Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
-                ["🔧 Action:", action],
-                ["🆔 Report ID:", hashlib.md5(f"{datetime.now()}{action}".encode()).hexdigest()[:8].upper()]
+                ["Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+                ["Action:", action],
+                ["Report ID:", hashlib.md5(f"{datetime.now()}{action}".encode()).hexdigest()[:8].upper()]
             ]
             info_table = Table(info_data, colWidths=[1.5*inch, 4*inch])
             info_table.setStyle(TableStyle([
@@ -279,7 +253,7 @@ class PDFReporter:
             
             # Status
             status_bg = colors.HexColor('#d4edda')
-            status_table = Table([["✅ OPERATION COMPLETED SUCCESSFULLY"]], colWidths=[6*inch])
+            status_table = Table([["OPERATION COMPLETED SUCCESSFULLY"]], colWidths=[6*inch])
             status_table.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,-1), status_bg),
                 ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#155724')),
@@ -296,16 +270,11 @@ class PDFReporter:
             story.append(Paragraph("AES-256 + LSB Steganography | Cybersecurity Project", footer_style))
             
             doc.build(story)
-            print(f"✅ PDF Report saved to: {output_path}")
+            print(f"PDF Report saved to: {output_path}")
             return output_path
         except Exception as e:
             print(f"❌ PDF Generation Error: {e}")
             return None
-
-
-# ============================================================
-#  ENCODER / DECODER
-# ============================================================
 
 class Encoder:
     def encode(self, image_path, message, password, output_path):
@@ -328,20 +297,12 @@ class Decoder:
             return None, "Wrong password or corrupted data!"
 
 
-# ============================================================
-#  CAPACITY CHECKER
-# ============================================================
-
 class Capacity:
     @staticmethod
     def check(image_path):
         img = Image.open(image_path)
         return max(0, (img.size[0] * img.size[1] * 3) // 8 - 32)
 
-
-# ============================================================
-#  PASSWORD STRENGTH HELPER
-# ============================================================
 
 def get_password_strength(pwd):
     score = 0
@@ -355,14 +316,10 @@ def get_password_strength(pwd):
     return score, labels[score] if score else "Very Weak", bar_colors[score] if score else "#ff4444"
 
 
-# ============================================================
-#  MAIN APPLICATION
-# ============================================================
-
 class CryptoStegApp:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("🔐 CryptoSteg v3.0 — Military Grade Steganography")
+        self.root.title("CryptoSteg v3.0 — Military Grade Steganography")
         self.root.geometry("1100x820")
         self.root.resizable(True, True)
         self.dark_mode = True
@@ -397,7 +354,7 @@ class CryptoStegApp:
         top = tk.Frame(self.root, bg=C['bg'])
         top.pack(fill='x', pady=10, padx=20)
 
-        tk.Label(top, text="🔐 CRYPTOSTEG v3.0", font=('Arial', 26, 'bold'),
+        tk.Label(top, text="CRYPTOSTEG v3.0", font=('Arial', 26, 'bold'),
                  bg=C['bg'], fg=C['accent']).pack(side='left')
 
         self.theme_btn = tk.Button(top,
@@ -499,7 +456,7 @@ class CryptoStegApp:
         self.enc_str_bar = ttk.Progressbar(pwd_frame, length=260, mode='determinate')
         self.enc_str_bar.pack(anchor='w', padx=12, pady=(2, 8))
 
-        self.enc_btn = tk.Button(tab, text="🚀  ENCODE & HIDE MESSAGE",
+        self.enc_btn = tk.Button(tab, text="ENCODE & HIDE MESSAGE",
                                  command=self._do_encode,
                                  bg=C['accent'], fg='#0a0a0a',
                                  font=('Arial', 12, 'bold'), padx=30, pady=10,
@@ -866,11 +823,6 @@ class CryptoStegApp:
 
     def run(self):
         self.root.mainloop()
-
-
-# ============================================================
-#  ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
     print("""
