@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-05-15 21:34:45",
+    "action": "ENCODE",
+    "details": "Image:bell.png \u2192 stego_imagees.png, 32 bytes",
+    "status": "SUCCESS"
+  },
+  {
+    "timestamp": "2026-05-15 21:35:34",
+    "action": "DECODE",
+    "details": "Image:stego_imagees.png, Len:13",
+    "status": "SUCCESS"
+  },
+  {
+    "timestamp": "2026-05-15 21:52:15",
+    "action": "ENCODE",
+    "details": "Image:yellow-alert.png \u2192 stego_image_i_hate_you.png, 32 bytes",
+    "status": "SUCCESS"
+  },
+  {
+    "timestamp": "2026-05-15 21:59:54",
+    "action": "DETECT",
+    "details": "Image:stego_image_i_hate_you.png, Score:95.0%",
+    "status": "COMPLETED"
+  },
+  {
+    "timestamp": "2026-05-15 22:12:42",
+    "action": "DECODE",
+    "details": "Image:stego_image_i_hate_you.png, Len:10",
+    "status": "SUCCESS"
+  }
+]
