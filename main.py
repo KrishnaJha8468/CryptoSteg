@@ -1,3 +1,835 @@
-"""
-# Last Updated: 05/15/2026 23:11:54
-""" CryptoSteg v3.0 - Ultimate Military Grade Steganography Tool Features: AES-256 + LSB Steganography + Detection + Logging + PDF Reports + Dark/Light Mode """  import tkinter as tk from tkinter import ttk, filedialog, messagebox, scrolledtext import os import hashlib import json from datetime import datetime from PIL import Image, ImageTk import numpy as np from Crypto.Cipher import AES from Crypto.Util.Padding import pad, unpad from Crypto.Random import get_random_bytes from reportlab.lib.pagesizes import letter, A4 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle from reportlab.lib import colors from reportlab.lib.units import inch from reportlab.lib.enums import TA_CENTER  # ============================================================ #  CORE CRYPTOGRAPHY # ============================================================  class AES256:     def __init__(self):         self.key = None      def set_password(self, password):         self.key = hashlib.sha256(password.encode()).digest()      def encrypt(self, plaintext):         if not self.key:             raise ValueError("Set password first!")         iv = get_random_bytes(16)         cipher = AES.new(self.key, AES.MODE_CBC, iv)         encrypted = cipher.encrypt(pad(plaintext.encode(), AES.block_size))         return iv + encrypted      def decrypt(self, data):         if not self.key:             raise ValueError("Set password first!")         iv = data[:16]         cipher = AES.new(self.key, AES.MODE_CBC, iv)         decrypted = cipher.decrypt(data[16:])         return unpad(decrypted, AES.block_size).decode()   # ============================================================ #  LSB STEGANOGRAPHY # ============================================================  class LSB:     END_MARKER = '1111111111111110'      def hide(self, image_path, data, output_path):         img = Image.open(image_path).convert('RGB')         pixels = np.array(img)         binary = ''.join(format(b, '08b') for b in data) + self.END_MARKER         h, w, _ = pixels.shape         if len(binary) > h * w * 3:             raise ValueError("Message too large for this image!")         idx = 0         for i in range(h):             for j in range(w):                 for k in range(3):                     if idx < len(binary):                         pixels[i][j][k] = (pixels[i][j][k] & 0xFE) | int(binary[idx])                         idx += 1         Image.fromarray(pixels).save(output_path, 'PNG')         return len(data)      def extract(self, image_path):         img = Image.open(image_path).convert('RGB')         pixels = np.array(img)         binary = ""         h, w, _ = pixels.shape         total_pixels = h * w                  # Don't exceed image bounds         max_iterations = total_pixels * 3                  pixel_count = 0         for i in range(h):             for j in range(w):                 for k in range(3):                     if pixel_count >= max_iterations:                         break                     binary += str(pixels[i][j][k] & 1)                     pixel_count += 1                                          if len(binary) >= 16 and binary[-16:] == self.END_MARKER:                         binary = binary[:-16]                         # Convert binary to bytes                         if len(binary) >= 8:                             return bytes(int(binary[x:x+8], 2) for x in range(0, len(binary), 8))                         return None                 if pixel_count >= max_iterations:                     break             if pixel_count >= max_iterations:                 break         return None   # ============================================================ #  STEG DETECTOR # ============================================================ class StegDetector:     @staticmethod     def analyze(image_path):         img = Image.open(image_path).convert('RGB')         pixels = np.array(img)         results = {'has_hidden_data': False, 'confidence': 0, 'details': [], 'lsb_distribution': {}}          h, w, _ = pixels.shape         total_pixels = h * w                  # Use the ACTUAL image size, not hardcoded 10000         sample_size = min(10000, total_pixels)  # ← Use image size if smaller                  print(f"📊 Image: {w}x{h}, Total pixels: {total_pixels}, Sampling: {sample_size}")  # Debug          for ch_idx, ch_name in enumerate(['Red', 'Green', 'Blue']):             flat = pixels[:, :, ch_idx].flatten()             # Make sure we don't go out of bounds             actual_sample = min(sample_size, len(flat))             lsb_vals = [int(p) & 1 for p in flat[:actual_sample]]             ones = sum(lsb_vals)             zeros = len(lsb_vals) - ones             ratio = ones / len(lsb_vals) if lsb_vals else 0.5             results['lsb_distribution'][ch_name] = {'ones': ones, 'zeros': zeros, 'ratio': ratio}             deviation = abs(ratio - 0.5)             if deviation > 0.1:                 results['details'].append(f"⚠️ {ch_name} channel unusual LSB ratio: {ratio:.3f}")                 results['confidence'] += deviation * 100          if results['confidence'] > 30:             results['has_hidden_data'] = True             results['confidence'] = min(results['confidence'], 95)         else:             results['confidence'] = max(5, 100 - results['confidence'])         return results   # ============================================================ #  ACTIVITY LOGGER # ============================================================  class ActivityLogger:     def __init__(self, log_file="logs/activity.json"):         self.log_file = log_file         os.makedirs(os.path.dirname(log_file), exist_ok=True)         if not os.path.exists(log_file):             with open(log_file, 'w') as f:                 json.dump([], f)      def add_log(self, action, details, status):         entry = {             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),             'action': action, 'details': details, 'status': status         }         with open(self.log_file, 'r') as f:             logs = json.load(f)         logs.append(entry)         with open(self.log_file, 'w') as f:             json.dump(logs, f, indent=2)         return entry      def get_logs(self):         with open(self.log_file, 'r') as f:             return json.load(f)      def clear_logs(self):         with open(self.log_file, 'w') as f:             json.dump([], f)   # ============================================================ #  PDF REPORT GENERATOR # ============================================================  class PDFReporter:     @staticmethod     def generate(action, details, output_path="reports/report.pdf"):         try:             os.makedirs("reports", exist_ok=True)                          doc = SimpleDocTemplate(output_path, pagesize=A4,                                    topMargin=0.7*inch, bottomMargin=0.7*inch,                                    leftMargin=0.7*inch, rightMargin=0.7*inch)                          styles = getSampleStyleSheet()                          title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'],                                         fontSize=28, textColor=colors.HexColor('#1a1a2e'),                                         alignment=TA_CENTER, spaceAfter=0.3*inch,                                         fontName='Helvetica-Bold')                          subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'],                                           fontSize=12, textColor=colors.HexColor('#666666'),                                           alignment=TA_CENTER, spaceAfter=0.5*inch)                          section_style = ParagraphStyle('SectionHeader', parent=styles['Heading2'],                                          fontSize=16, textColor=colors.HexColor('#0f3460'),                                          spaceBefore=0.2*inch, spaceAfter=0.1*inch,                                          fontName='Helvetica-Bold')                          footer_style = ParagraphStyle('Footer', parent=styles['Normal'],                                         fontSize=8, textColor=colors.HexColor('#999999'),                                         alignment=TA_CENTER)                          story = []                          # Header             story.append(Paragraph("🔐 CRYPTOSTEG v3.0", title_style))             story.append(Paragraph("Military-Grade Steganography Report", subtitle_style))             story.append(Spacer(1, 0.1*inch))             story.append(Table([['']], colWidths=[7*inch], rowHeights=[2],                               style=TableStyle([('LINEABOVE', (0,0), (-1,-1), 1, colors.HexColor('#00ff88'))])))             story.append(Spacer(1, 0.2*inch))                          # Report Metadata             story.append(Paragraph("📋 REPORT INFORMATION", section_style))             info_data = [                 ["📅 Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],                 ["🔧 Action:", action],                 ["🆔 Report ID:", hashlib.md5(f"{datetime.now()}{action}".encode()).hexdigest()[:8].upper()]             ]             info_table = Table(info_data, colWidths=[1.5*inch, 4*inch])             info_table.setStyle(TableStyle([                 ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#f5f5f5')),                 ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#1a1a2e')),                 ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),                 ('FONTSIZE', (0,0), (-1,-1), 10),                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dddddd')),                 ('PADDING', (0,0), (-1,-1), 6),             ]))             story.append(info_table)             story.append(Spacer(1, 0.2*inch))                          # Action Details             story.append(Paragraph("⚡ ACTION DETAILS", section_style))             action_data = [[f"📌 {key}:", value] for key, value in details.items()]             action_table = Table(action_data, colWidths=[2*inch, 3.5*inch])             action_table.setStyle(TableStyle([                 ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#e8f4f8')),                 ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#0f3460')),                 ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),                 ('FONTSIZE', (0,0), (-1,-1), 10),                 ('PADDING', (0,0), (-1,-1), 5),             ]))             story.append(action_table)             story.append(Spacer(1, 0.2*inch))                          # Security Info             story.append(Paragraph("🛡️ SECURITY INFORMATION", section_style))             security_data = [                 ["Encryption Algorithm", "AES-256-CBC (Military Grade)"],                 ["Steganography Method", "LSB (Least Significant Bit)"],                 ["Key Derivation", "SHA-256 (256-bit key)"],                 ["Security Level", "Top Secret / Classified"],             ]             security_table = Table(security_data, colWidths=[2.5*inch, 3*inch])             security_table.setStyle(TableStyle([                 ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#1a1a2e')),                 ('TEXTCOLOR', (0,0), (0,-1), colors.white),                 ('BACKGROUND', (1,0), (1,-1), colors.HexColor('#f0f0f0')),                 ('TEXTCOLOR', (1,0), (1,-1), colors.HexColor('#333333')),                 ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),                 ('FONTSIZE', (0,0), (-1,-1), 10),                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cccccc')),                 ('PADDING', (0,0), (-1,-1), 6),             ]))             story.append(security_table)             story.append(Spacer(1, 0.3*inch))                          # Status             status_bg = colors.HexColor('#d4edda')             status_table = Table([["✅ OPERATION COMPLETED SUCCESSFULLY"]], colWidths=[6*inch])             status_table.setStyle(TableStyle([                 ('BACKGROUND', (0,0), (-1,-1), status_bg),                 ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#155724')),                 ('ALIGN', (0,0), (-1,-1), 'CENTER'),                 ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),                 ('FONTSIZE', (0,0), (-1,-1), 12),                 ('PADDING', (0,0), (-1,-1), 10),             ]))             story.append(status_table)                          # Footer             story.append(Spacer(1, 0.4*inch))             story.append(Paragraph("This report was automatically generated by CryptoSteg v3.0", footer_style))             story.append(Paragraph("AES-256 + LSB Steganography | Cybersecurity Project", footer_style))                          doc.build(story)             print(f"✅ PDF Report saved to: {output_path}")             return output_path         except Exception as e:             print(f"❌ PDF Generation Error: {e}")             return None   # ============================================================ #  ENCODER / DECODER # ============================================================  class Encoder:     def encode(self, image_path, message, password, output_path):         crypto = AES256()         crypto.set_password(password)         encrypted = crypto.encrypt(message)         return LSB().hide(image_path, encrypted, output_path)   class Decoder:     def decode(self, image_path, password):         extracted = LSB().extract(image_path)         if not extracted:             return None, "No hidden data found!"         try:             crypto = AES256()             crypto.set_password(password)             return crypto.decrypt(extracted), None         except Exception:             return None, "Wrong password or corrupted data!"   # ============================================================ #  CAPACITY CHECKER # ============================================================  class Capacity:     @staticmethod     def check(image_path):         img = Image.open(image_path)         return max(0, (img.size[0] * img.size[1] * 3) // 8 - 32)   # ============================================================ #  PASSWORD STRENGTH HELPER # ============================================================  def get_password_strength(pwd):     score = 0     if len(pwd) >= 8: score += 1     if len(pwd) >= 12: score += 1     if any(c.isupper() for c in pwd): score += 1     if any(c.isdigit() for c in pwd): score += 1     if any(c in "!@#$%^&*()_+-=[]{}|;':\",./<>?" for c in pwd): score += 1     labels = ["", "Very Weak", "Weak", "Fair", "Strong", "Very Strong"]     bar_colors = ["", "#ff4444", "#ff8800", "#ffaa00", "#88cc00", "#00ff88"]     return score, labels[score] if score else "Very Weak", bar_colors[score] if score else "#ff4444"   # ============================================================ #  MAIN APPLICATION # ============================================================  class CryptoStegApp:     def __init__(self):         self.root = tk.Tk()         self.root.title("🔐 CryptoSteg v3.0 — Military Grade Steganography")         self.root.geometry("1100x820")         self.root.resizable(True, True)         self.dark_mode = True         self.logger = ActivityLogger()          self.encode_image_path = None         self.decode_image_path = None         self.detect_image_path = None          self._setup_colors()         self._build_ui()      def _setup_colors(self):         if self.dark_mode:             self.C = {                 'bg': '#1a1a2e', 'frame': '#16213e', 'input': '#0f3460',                 'text': '#ffffff', 'sub': '#888888',                 'accent': '#00ff88', 'danger': '#ff4444', 'warn': '#ffaa00',             }         else:             self.C = {                 'bg': '#f4f4f4', 'frame': '#e0e0e0', 'input': '#ffffff',                 'text': '#111111', 'sub': '#555555',                 'accent': '#007755', 'danger': '#cc0000', 'warn': '#cc7700',             }      def _build_ui(self):         C = self.C         self.root.configure(bg=C['bg'])          # Title bar         top = tk.Frame(self.root, bg=C['bg'])         top.pack(fill='x', pady=10, padx=20)          tk.Label(top, text="🔐 CRYPTOSTEG v3.0", font=('Arial', 26, 'bold'),                  bg=C['bg'], fg=C['accent']).pack(side='left')          self.theme_btn = tk.Button(top,             text="☀️ Light Mode" if self.dark_mode else "🌙 Dark Mode",             command=self._toggle_theme, bg=C['input'], fg=C['text'], padx=12, pady=5,             relief='flat', cursor='hand2')         self.theme_btn.pack(side='right')          tk.Label(self.root,                  text="AES-256 Encryption  •  LSB Steganography  •  Steganalysis  •  Logging  •  PDF Reports",                  font=('Arial', 9), bg=C['bg'], fg=C['sub']).pack()          # Notebook         style = ttk.Style()         style.theme_use('default')         style.configure('TNotebook', background=C['bg'], borderwidth=0)         style.configure('TNotebook.Tab', background=C['frame'], foreground=C['text'],                         padding=[14, 6], font=('Arial', 10, 'bold'))         style.map('TNotebook.Tab', background=[('selected', C['input'])],                   foreground=[('selected', C['accent'])])          self.nb = ttk.Notebook(self.root)         self.nb.pack(fill='both', expand=True, padx=20, pady=8)          self.nb.add(self._encode_tab(), text="🔒  Encode")         self.nb.add(self._decode_tab(), text="🔓  Decode")         self.nb.add(self._detect_tab(), text="🕵️  Detect")         self.nb.add(self._logs_tab(), text="📋  Activity Log")          # Status bar         self.status = tk.Label(self.root, text="✅ CryptoSteg ready.", anchor='w',                                bg=C['frame'], fg=C['sub'], font=('Arial', 9), padx=10)         self.status.pack(fill='x', side='bottom')      def _encode_tab(self):         C = self.C         tab = tk.Frame(self.nb, bg=C['frame'])          img_frame = tk.LabelFrame(tab, text=" Step 1 · Select Cover Image ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         img_frame.pack(fill='x', padx=20, pady=(12, 6))          row = tk.Frame(img_frame, bg=C['frame'])         row.pack(fill='x', padx=10, pady=8)          self.enc_preview = tk.Label(row, text="No image selected\n(PNG / BMP / JPG)",                                     bg=C['input'], fg=C['sub'], width=22, height=7,                                     relief='flat')         self.enc_preview.pack(side='left', padx=(0, 12))          info_col = tk.Frame(row, bg=C['frame'])         info_col.pack(side='left', fill='both', expand=True)          tk.Button(info_col, text="📁  Browse Image", command=self._enc_browse,                   bg=C['input'], fg=C['text'], padx=14, pady=6,                   relief='flat', cursor='hand2').pack(anchor='w')          self.enc_cap_label = tk.Label(info_col, text="", bg=C['frame'], fg=C['warn'])         self.enc_cap_label.pack(anchor='w', pady=(6, 0))          self.enc_cap_bar = ttk.Progressbar(info_col, length=280, mode='determinate')         self.enc_cap_bar.pack(anchor='w', pady=(4, 0))          self.enc_cap_used = tk.Label(info_col, text="", bg=C['frame'], fg=C['sub'])         self.enc_cap_used.pack(anchor='w')          msg_frame = tk.LabelFrame(tab, text=" Step 2 · Enter Secret Message ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         msg_frame.pack(fill='both', expand=True, padx=20, pady=6)          self.enc_msg = scrolledtext.ScrolledText(msg_frame, height=5,                                                  bg=C['input'], fg=C['text'],                                                  insertbackground=C['text'], font=('Consolas', 10))         self.enc_msg.pack(fill='both', expand=True, padx=10, pady=(8, 2))         self.enc_msg.bind('<KeyRelease>', self._enc_on_type)          self.enc_char_label = tk.Label(msg_frame, text="Characters: 0",                                        bg=C['frame'], fg=C['sub'])         self.enc_char_label.pack(anchor='e', padx=12, pady=(0, 6))          pwd_frame = tk.LabelFrame(tab, text=" Step 3 · Set Password (AES-256) ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         pwd_frame.pack(fill='x', padx=20, pady=6)          pwd_row = tk.Frame(pwd_frame, bg=C['frame'])         pwd_row.pack(fill='x', padx=10, pady=8)          self.enc_pwd = tk.Entry(pwd_row, show="•", width=34, bg=C['input'],                                 fg=C['text'], insertbackground=C['text'], font=('Arial', 11))         self.enc_pwd.pack(side='left')         self.enc_pwd.bind('<KeyRelease>', self._enc_pwd_changed)          self.enc_show_pwd = tk.Button(pwd_row, text="👁", command=self._enc_toggle_pwd,                                       bg=C['input'], fg=C['text'], padx=6, relief='flat')         self.enc_show_pwd.pack(side='left', padx=4)          self.enc_str_label = tk.Label(pwd_frame, text="", bg=C['frame'])         self.enc_str_label.pack(anchor='w', padx=12)         self.enc_str_bar = ttk.Progressbar(pwd_frame, length=260, mode='determinate')         self.enc_str_bar.pack(anchor='w', padx=12, pady=(2, 8))          self.enc_btn = tk.Button(tab, text="🚀  ENCODE & HIDE MESSAGE",                                  command=self._do_encode,                                  bg=C['accent'], fg='#0a0a0a',                                  font=('Arial', 12, 'bold'), padx=30, pady=10,                                  state='disabled', relief='flat', cursor='hand2')         self.enc_btn.pack(pady=12)          return tab      def _enc_browse(self):         path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.bmp *.jpg *.jpeg")])         if not path:             return         self.encode_image_path = path         img = Image.open(path)         img.thumbnail((160, 110))         photo = ImageTk.PhotoImage(img)         self.enc_preview.config(image=photo, text="")         self.enc_preview.image = photo         cap = Capacity.check(path)         self.enc_cap_label.config(text=f"📊 Max capacity: {cap:,} characters")         self._enc_update_cap_bar()         self._enc_check_ready()      def _enc_update_cap_bar(self):         if not self.encode_image_path:             return         cap = Capacity.check(self.encode_image_path)         msg_len = len(self.enc_msg.get("1.0", tk.END).strip())         pct = min(100, (msg_len / cap * 100)) if cap > 0 else 0         self.enc_cap_bar['value'] = pct         self.enc_cap_used.config(text=f"{msg_len} / {cap:,} characters used ({pct:.1f}%)")      def _enc_on_type(self, event=None):         msg = self.enc_msg.get("1.0", tk.END).strip()         self.enc_char_label.config(text=f"Characters: {len(msg)}")         self._enc_update_cap_bar()         self._enc_check_ready()      def _enc_pwd_changed(self, event=None):         pwd = self.enc_pwd.get()         score, label, color = get_password_strength(pwd)         self.enc_str_label.config(text=f"Strength: {label}", fg=color)         self.enc_str_bar['value'] = score * 20         self._enc_check_ready()      def _enc_toggle_pwd(self):         cur = self.enc_pwd.cget('show')         self.enc_pwd.config(show='' if cur == '•' else '•')      def _enc_check_ready(self):         ok = (self.encode_image_path and               self.enc_msg.get("1.0", tk.END).strip() and               self.enc_pwd.get())         self.enc_btn.config(state='normal' if ok else 'disabled')      def _do_encode(self):         msg = self.enc_msg.get("1.0", tk.END).strip()         pwd = self.enc_pwd.get()          if len(msg) > Capacity.check(self.encode_image_path):             messagebox.showerror("Error", "❌ Message too large for selected image!")             return          save_path = filedialog.asksaveasfilename(             defaultextension=".png", filetypes=[("PNG", "*.png")],             initialfile="stego_image.png")         if not save_path:             return          try:             bytes_hidden = Encoder().encode(self.encode_image_path, msg, pwd, save_path)              self.logger.add_log("ENCODE",                 f"Image:{os.path.basename(self.encode_image_path)} → {os.path.basename(save_path)}, {bytes_hidden} bytes",                 "SUCCESS")              report = PDFReporter.generate("ENCODE", {                 "Input Image": os.path.basename(self.encode_image_path),                 "Output Image": os.path.basename(save_path),                 "Message Length": f"{len(msg)} characters",                 "Bytes Hidden": f"{bytes_hidden} bytes",                 "Encryption": "AES-256-CBC",             })              messagebox.showinfo("✅ Success!",                 f"Message hidden successfully!\n\n"                 f"📁 Output: {os.path.basename(save_path)}\n"                 f"📊 Bytes hidden: {bytes_hidden}\n"                 f"🔐 Encrypted with AES-256\n"                 f"📄 Report saved: {report}")              self.enc_msg.delete("1.0", tk.END)             self.enc_pwd.delete(0, tk.END)             self.enc_preview.config(image='', text="No image selected\n(PNG / BMP / JPG)")             self.enc_preview.image = None             self.encode_image_path = None             self.enc_cap_label.config(text="")             self.enc_cap_bar['value'] = 0             self.enc_cap_used.config(text="")             self.enc_str_label.config(text="")             self.enc_str_bar['value'] = 0             self.enc_btn.config(state='disabled')             self.status.config(text=f"✅ Encode successful!")             self._refresh_logs()          except Exception as e:             messagebox.showerror("Error", str(e))             self.logger.add_log("ENCODE", str(e), "FAILED")      def _decode_tab(self):         C = self.C         tab = tk.Frame(self.nb, bg=C['frame'])          img_frame = tk.LabelFrame(tab, text=" Step 1 · Select Stego-Image ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         img_frame.pack(fill='x', padx=20, pady=(12, 6))          self.dec_img_label = tk.Label(img_frame, text="No image selected",                                       bg=C['input'], fg=C['sub'], height=2)         self.dec_img_label.pack(fill='x', padx=10, pady=8)          tk.Button(img_frame, text="📁  Browse Stego-Image", command=self._dec_browse,                   bg=C['input'], fg=C['text'], padx=14, pady=6,                   relief='flat', cursor='hand2').pack(pady=(0, 8))          pwd_frame = tk.LabelFrame(tab, text=" Step 2 · Enter Password (AES-256) ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         pwd_frame.pack(fill='x', padx=20, pady=6)          pwd_row = tk.Frame(pwd_frame, bg=C['frame'])         pwd_row.pack(padx=10, pady=8)          self.dec_pwd = tk.Entry(pwd_row, show="•", width=34, bg=C['input'],                                 fg=C['text'], insertbackground=C['text'], font=('Arial', 11))         self.dec_pwd.pack(side='left')         self.dec_pwd.bind('<KeyRelease>', self._dec_check_ready)          tk.Button(pwd_row, text="👁", command=self._dec_toggle_pwd,                   bg=C['input'], fg=C['text'], padx=6, relief='flat').pack(side='left', padx=4)          self.dec_btn = tk.Button(tab, text="🔓  DECODE & EXTRACT MESSAGE",                                  command=self._do_decode,                                  bg=C['danger'], fg='#ffffff',                                  font=('Arial', 12, 'bold'), padx=30, pady=10,                                  state='disabled', relief='flat', cursor='hand2')         self.dec_btn.pack(pady=10)          out_frame = tk.LabelFrame(tab, text=" Extracted Message ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         out_frame.pack(fill='both', expand=True, padx=20, pady=6)          self.dec_output = scrolledtext.ScrolledText(out_frame, height=10,                                                     bg=C['input'], fg=C['accent'],                                                     font=('Consolas', 11))         self.dec_output.pack(fill='both', expand=True, padx=10, pady=(8, 4))          tk.Button(out_frame, text="📋  Copy to Clipboard", command=self._dec_copy,                   bg=C['input'], fg=C['text'], padx=12, pady=4,                   relief='flat', cursor='hand2').pack(anchor='e', padx=10, pady=(0, 8))          return tab      def _dec_browse(self):         path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.bmp")])         if path:             self.decode_image_path = path             self.dec_img_label.config(text=f"📷  {os.path.basename(path)}", fg=self.C['text'])             self._dec_check_ready()      def _dec_toggle_pwd(self):         cur = self.dec_pwd.cget('show')         self.dec_pwd.config(show='' if cur == '•' else '•')      def _dec_check_ready(self, event=None):         ok = self.decode_image_path and self.dec_pwd.get()         self.dec_btn.config(state='normal' if ok else 'disabled')      def _do_decode(self):         pwd = self.dec_pwd.get()         msg, error = Decoder().decode(self.decode_image_path, pwd)          if msg:             self.dec_output.delete("1.0", tk.END)             self.dec_output.insert("1.0", msg)             self.logger.add_log("DECODE",                 f"Image:{os.path.basename(self.decode_image_path)}, Len:{len(msg)}", "SUCCESS")             PDFReporter.generate("DECODE", {                 "Image": os.path.basename(self.decode_image_path),                 "Message Length": f"{len(msg)} characters",             })             messagebox.showinfo("✅ Success!", "Message extracted and decrypted successfully!")             self.status.config(text="✅ Decode successful!")         else:             messagebox.showerror("❌ Failed", error)             self.logger.add_log("DECODE",                 f"Image:{os.path.basename(self.decode_image_path)}", f"FAILED: {error}")          self._refresh_logs()      def _dec_copy(self):         text = self.dec_output.get("1.0", tk.END).strip()         if text:             self.root.clipboard_clear()             self.root.clipboard_append(text)             self.status.config(text="📋 Message copied to clipboard!")         else:             messagebox.showwarning("Empty", "Nothing to copy!")      def _detect_tab(self):         C = self.C         tab = tk.Frame(self.nb, bg=C['frame'])          img_frame = tk.LabelFrame(tab, text=" Select Image for Steganalysis ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         img_frame.pack(fill='x', padx=20, pady=(12, 6))          self.det_img_label = tk.Label(img_frame, text="No image selected",                                       bg=C['input'], fg=C['sub'], height=2)         self.det_img_label.pack(fill='x', padx=10, pady=8)          tk.Button(img_frame, text="📁  Browse Image", command=self._det_browse,                   bg=C['input'], fg=C['text'], padx=14, pady=6,                   relief='flat', cursor='hand2').pack(pady=(0, 8))          self.det_btn = tk.Button(tab, text="🔍  RUN STEGANALYSIS",                                  command=self._do_detect,                                  bg=C['warn'], fg='#0a0a0a',                                  font=('Arial', 12, 'bold'), padx=30, pady=10,                                  state='disabled', relief='flat', cursor='hand2')         self.det_btn.pack(pady=10)          res_frame = tk.LabelFrame(tab, text=" Analysis Results ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         res_frame.pack(fill='both', expand=True, padx=20, pady=6)          self.det_results = scrolledtext.ScrolledText(res_frame, height=14,                                                      bg=C['input'], fg=C['text'],                                                      font=('Consolas', 10))         self.det_results.pack(fill='both', expand=True, padx=10, pady=10)         self.det_results.insert("1.0", "🔍 Select an image and click 'RUN STEGANALYSIS' to begin...\n")          return tab      def _det_browse(self):         path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.bmp *.jpg *.jpeg")])         if path:             self.detect_image_path = path             self.det_img_label.config(text=f"📷  {os.path.basename(path)}", fg=self.C['text'])             self.det_btn.config(state='normal')      def _do_detect(self):         if not self.detect_image_path:             messagebox.showerror("Error", "Please select an image first!")             return                  try:             results = StegDetector.analyze(self.detect_image_path)             self.det_results.delete("1.0", tk.END)              sep = "═" * 58             out = f"{sep}\n  🔍  STEGANALYSIS REPORT — CryptoSteg v3.0\n{sep}\n\n"             out += f"  📁  File : {os.path.basename(self.detect_image_path)}\n"             out += f"  🕐  Time : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"             out += f"  📊  LSB Distribution (first 10,000 pixels per channel):\n"                          for ch, d in results['lsb_distribution'].items():                 out += f"      {ch:5s} → Ones: {d['ones']:5d}  Zeros: {d['zeros']:5d}  Ratio: {d['ratio']:.4f}\n"              out += f"\n  🎯  Suspicion Score : {results['confidence']:.1f}%\n\n"                          if results['has_hidden_data']:                 out += f"  ⚠️  VERDICT: HIGH probability of hidden data detected!\n"                 out += f"      Forensic analysis recommended.\n"             else:                 out += f"  ✅  VERDICT: LOW probability of hidden data.\n"                 out += f"      Image appears clean.\n"                          out += f"\n{sep}\n"                          if results['details']:                 out += "\n  📋  Anomalies:\n"                 for d in results['details']:                     out += f"      {d}\n"              self.det_results.insert("1.0", out)             self.logger.add_log("DETECT",                 f"Image:{os.path.basename(self.detect_image_path)}, Score:{results['confidence']:.1f}%",                 "COMPLETED")             self.status.config(text=f"🔍 Steganalysis complete. Score: {results['confidence']:.1f}%")             self._refresh_logs()                          messagebox.showinfo("Analysis Complete", f"Results displayed!\nConfidence Score: {results['confidence']:.1f}%")                      except Exception as e:             messagebox.showerror("Error", f"Analysis failed: {str(e)}")             self.det_results.insert("1.0", f"❌ ERROR: {str(e)}\n\nCheck that the image file is valid.")      def _logs_tab(self):         C = self.C         tab = tk.Frame(self.nb, bg=C['frame'])          ctrl = tk.Frame(tab, bg=C['frame'])         ctrl.pack(fill='x', padx=20, pady=10)          tk.Button(ctrl, text="🔄  Refresh", command=self._refresh_logs,                   bg=C['input'], fg=C['text'], padx=12, pady=6,                   relief='flat', cursor='hand2').pack(side='left', padx=4)          tk.Button(ctrl, text="📄  Export PDF", command=self._export_logs_pdf,                   bg=C['accent'], fg='#0a0a0a', padx=12, pady=6,                   relief='flat', cursor='hand2').pack(side='left', padx=4)          tk.Button(ctrl, text="🗑️  Clear Logs", command=self._clear_logs,                   bg=C['danger'], fg='#ffffff', padx=12, pady=6,                   relief='flat', cursor='hand2').pack(side='left', padx=4)          log_frame = tk.LabelFrame(tab, text=" Activity History ",                                   bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))         log_frame.pack(fill='both', expand=True, padx=20, pady=6)          self.logs_text = scrolledtext.ScrolledText(log_frame, height=22,                                                    bg=C['input'], fg=C['text'],                                                    font=('Consolas', 9))         self.logs_text.pack(fill='both', expand=True, padx=10, pady=10)          self._refresh_logs()         return tab      def _refresh_logs(self):         self.logs_text.delete("1.0", tk.END)         logs = self.logger.get_logs()         if not logs:             self.logs_text.insert("1.0", "  No activity logs yet.\n")             return         for log in reversed(logs[-100:]):             line = f"[{log['timestamp']}]  {log['action']:<10} {log['status']:<12} {log['details']}\n"             self.logs_text.insert(tk.END, line)      def _export_logs_pdf(self):         logs = self.logger.get_logs()         if not logs:             messagebox.showwarning("Empty", "No logs to export!")             return         path = filedialog.asksaveasfilename(defaultextension=".pdf",                                             filetypes=[("PDF", "*.pdf")],                                             initialfile="cryptosteg_logs.pdf")         if path:             PDFReporter.generate("ACTIVITY LOGS",                                  {"Total Entries": str(len(logs))}, path)             messagebox.showinfo("✅ Done", f"Logs exported to:\n{path}")      def _clear_logs(self):         if messagebox.askyesno("Confirm", "Clear all activity logs?"):             self.logger.clear_logs()             self._refresh_logs()             messagebox.showinfo("Done", "✅ Logs cleared!")      def _toggle_theme(self):         self.dark_mode = not self.dark_mode         for widget in self.root.winfo_children():             widget.destroy()         self._setup_colors()         self._build_ui()      def run(self):         self.root.mainloop()   # ============================================================ #  ENTRY POINT # ============================================================  if __name__ == "__main__":     print(""" ╔══════════════════════════════════════════════════════╗ ║   🔐 CryptoSteg v3.0 — Ultimate Steganography Tool  ║ ║   AES-256 · LSB · Steganalysis · Logging · Reports  ║ ╚══════════════════════════════════════════════════════╝     """)     app = CryptoStegApp()     app.run()# Version: 3.0 - Military Grade Steganography Tool
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, scrolledtext
+import os
+import hashlib
+import json
+from datetime import datetime
+from PIL import Image, ImageTk
+import numpy as np
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+from Crypto.Random import get_random_bytes
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER
+
+
+class AES256:
+    def __init__(self):
+        self.key = None
+
+    def set_password(self, password):
+        self.key = hashlib.sha256(password.encode()).digest()
+
+    def encrypt(self, plaintext):
+        if not self.key:
+            raise ValueError("Set password first!")
+        iv = get_random_bytes(16)
+        cipher = AES.new(self.key, AES.MODE_CBC, iv)
+        encrypted = cipher.encrypt(pad(plaintext.encode(), AES.block_size))
+        return iv + encrypted
+
+    def decrypt(self, data):
+        if not self.key:
+            raise ValueError("Set password first!")
+        iv = data[:16]
+        cipher = AES.new(self.key, AES.MODE_CBC, iv)
+        decrypted = cipher.decrypt(data[16:])
+        return unpad(decrypted, AES.block_size).decode()
+
+
+class LSB:
+    END_MARKER = '1111111111111110'
+
+    def hide(self, image_path, data, output_path):
+        img = Image.open(image_path).convert('RGB')
+        pixels = np.array(img)
+        binary = ''.join(format(b, '08b') for b in data) + self.END_MARKER
+        h, w, _ = pixels.shape
+        if len(binary) > h * w * 3:
+            raise ValueError("Message too large for this image!")
+        idx = 0
+        for i in range(h):
+            for j in range(w):
+                for k in range(3):
+                    if idx < len(binary):
+                        pixels[i][j][k] = (pixels[i][j][k] & 0xFE) | int(binary[idx])
+                        idx += 1
+        Image.fromarray(pixels).save(output_path, 'PNG')
+        return len(data)
+
+    def extract(self, image_path):
+        img = Image.open(image_path).convert('RGB')
+        pixels = np.array(img)
+        binary = ""
+        h, w, _ = pixels.shape
+        total_pixels = h * w
+        
+        # Don't exceed image bounds
+        max_iterations = total_pixels * 3
+        
+        pixel_count = 0
+        for i in range(h):
+            for j in range(w):
+                for k in range(3):
+                    if pixel_count >= max_iterations:
+                        break
+                    binary += str(pixels[i][j][k] & 1)
+                    pixel_count += 1
+                    
+                    if len(binary) >= 16 and binary[-16:] == self.END_MARKER:
+                        binary = binary[:-16]
+                        # Convert binary to bytes
+                        if len(binary) >= 8:
+                            return bytes(int(binary[x:x+8], 2) for x in range(0, len(binary), 8))
+                        return None
+                if pixel_count >= max_iterations:
+                    break
+            if pixel_count >= max_iterations:
+                break
+        return None
+
+class StegDetector:
+    @staticmethod
+    def analyze(image_path):
+        img = Image.open(image_path).convert('RGB')
+        pixels = np.array(img)
+        results = {'has_hidden_data': False, 'confidence': 0, 'details': [], 'lsb_distribution': {}}
+
+        h, w, _ = pixels.shape
+        total_pixels = h * w
+        
+        # Use the ACTUAL image size, not hardcoded 10000
+        sample_size = min(10000, total_pixels)  # ← Use image size if smaller
+        
+        print(f"📊 Image: {w}x{h}, Total pixels: {total_pixels}, Sampling: {sample_size}")  # Debug
+
+        for ch_idx, ch_name in enumerate(['Red', 'Green', 'Blue']):
+            flat = pixels[:, :, ch_idx].flatten()
+            # Make sure we don't go out of bounds
+            actual_sample = min(sample_size, len(flat))
+            lsb_vals = [int(p) & 1 for p in flat[:actual_sample]]
+            ones = sum(lsb_vals)
+            zeros = len(lsb_vals) - ones
+            ratio = ones / len(lsb_vals) if lsb_vals else 0.5
+            results['lsb_distribution'][ch_name] = {'ones': ones, 'zeros': zeros, 'ratio': ratio}
+            deviation = abs(ratio - 0.5)
+            if deviation > 0.1:
+                results['details'].append(f"⚠️ {ch_name} channel unusual LSB ratio: {ratio:.3f}")
+                results['confidence'] += deviation * 100
+
+        if results['confidence'] > 30:
+            results['has_hidden_data'] = True
+            results['confidence'] = min(results['confidence'], 95)
+        else:
+            results['confidence'] = max(5, 100 - results['confidence'])
+        return results
+
+class ActivityLogger:
+    def __init__(self, log_file="logs/activity.json"):
+        self.log_file = log_file
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        if not os.path.exists(log_file):
+            with open(log_file, 'w') as f:
+                json.dump([], f)
+
+    def add_log(self, action, details, status):
+        entry = {
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'action': action, 'details': details, 'status': status
+        }
+        with open(self.log_file, 'r') as f:
+            logs = json.load(f)
+        logs.append(entry)
+        with open(self.log_file, 'w') as f:
+            json.dump(logs, f, indent=2)
+        return entry
+
+    def get_logs(self):
+        with open(self.log_file, 'r') as f:
+            return json.load(f)
+
+    def clear_logs(self):
+        with open(self.log_file, 'w') as f:
+            json.dump([], f)
+
+class PDFReporter:
+    @staticmethod
+    def generate(action, details, output_path="reports/report.pdf"):
+        try:
+            os.makedirs("reports", exist_ok=True)
+            
+            doc = SimpleDocTemplate(output_path, pagesize=A4,
+                                   topMargin=0.7*inch, bottomMargin=0.7*inch,
+                                   leftMargin=0.7*inch, rightMargin=0.7*inch)
+            
+            styles = getSampleStyleSheet()
+            
+            title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'],
+                                        fontSize=28, textColor=colors.HexColor('#1a1a2e'),
+                                        alignment=TA_CENTER, spaceAfter=0.3*inch,
+                                        fontName='Helvetica-Bold')
+            
+            subtitle_style = ParagraphStyle('CustomSubtitle', parent=styles['Normal'],
+                                          fontSize=12, textColor=colors.HexColor('#666666'),
+                                          alignment=TA_CENTER, spaceAfter=0.5*inch)
+            
+            section_style = ParagraphStyle('SectionHeader', parent=styles['Heading2'],
+                                         fontSize=16, textColor=colors.HexColor('#0f3460'),
+                                         spaceBefore=0.2*inch, spaceAfter=0.1*inch,
+                                         fontName='Helvetica-Bold')
+            
+            footer_style = ParagraphStyle('Footer', parent=styles['Normal'],
+                                        fontSize=8, textColor=colors.HexColor('#999999'),
+                                        alignment=TA_CENTER)
+            
+            story = []
+            
+            # Header
+            story.append(Paragraph("CRYPTOSTEG v3.0", title_style))
+            story.append(Paragraph("Military-Grade Steganography Report", subtitle_style))
+            story.append(Spacer(1, 0.1*inch))
+            story.append(Table([['']], colWidths=[7*inch], rowHeights=[2],
+                              style=TableStyle([('LINEABOVE', (0,0), (-1,-1), 1, colors.HexColor('#00ff88'))])))
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Report Metadata
+            story.append(Paragraph("REPORT INFORMATION", section_style))
+            info_data = [
+                ["Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+                ["Action:", action],
+                ["Report ID:", hashlib.md5(f"{datetime.now()}{action}".encode()).hexdigest()[:8].upper()]
+            ]
+            info_table = Table(info_data, colWidths=[1.5*inch, 4*inch])
+            info_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#f5f5f5')),
+                ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#1a1a2e')),
+                ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 10),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dddddd')),
+                ('PADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(info_table)
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Action Details
+            story.append(Paragraph("⚡ ACTION DETAILS", section_style))
+            action_data = [[f"📌 {key}:", value] for key, value in details.items()]
+            action_table = Table(action_data, colWidths=[2*inch, 3.5*inch])
+            action_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#e8f4f8')),
+                ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#0f3460')),
+                ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 10),
+                ('PADDING', (0,0), (-1,-1), 5),
+            ]))
+            story.append(action_table)
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Security Info
+            story.append(Paragraph("🛡️ SECURITY INFORMATION", section_style))
+            security_data = [
+                ["Encryption Algorithm", "AES-256-CBC (Military Grade)"],
+                ["Steganography Method", "LSB (Least Significant Bit)"],
+                ["Key Derivation", "SHA-256 (256-bit key)"],
+                ["Security Level", "Top Secret / Classified"],
+            ]
+            security_table = Table(security_data, colWidths=[2.5*inch, 3*inch])
+            security_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#1a1a2e')),
+                ('TEXTCOLOR', (0,0), (0,-1), colors.white),
+                ('BACKGROUND', (1,0), (1,-1), colors.HexColor('#f0f0f0')),
+                ('TEXTCOLOR', (1,0), (1,-1), colors.HexColor('#333333')),
+                ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 10),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cccccc')),
+                ('PADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(security_table)
+            story.append(Spacer(1, 0.3*inch))
+            
+            # Status
+            status_bg = colors.HexColor('#d4edda')
+            status_table = Table([["OPERATION COMPLETED SUCCESSFULLY"]], colWidths=[6*inch])
+            status_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), status_bg),
+                ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#155724')),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,-1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 12),
+                ('PADDING', (0,0), (-1,-1), 10),
+            ]))
+            story.append(status_table)
+            
+            # Footer
+            story.append(Spacer(1, 0.4*inch))
+            story.append(Paragraph("This report was automatically generated by CryptoSteg v3.0", footer_style))
+            story.append(Paragraph("AES-256 + LSB Steganography | Cybersecurity Project", footer_style))
+            
+            doc.build(story)
+            print(f"PDF Report saved to: {output_path}")
+            return output_path
+        except Exception as e:
+            print(f"❌ PDF Generation Error: {e}")
+            return None
+
+class Encoder:
+    def encode(self, image_path, message, password, output_path):
+        crypto = AES256()
+        crypto.set_password(password)
+        encrypted = crypto.encrypt(message)
+        return LSB().hide(image_path, encrypted, output_path)
+
+
+class Decoder:
+    def decode(self, image_path, password):
+        extracted = LSB().extract(image_path)
+        if not extracted:
+            return None, "No hidden data found!"
+        try:
+            crypto = AES256()
+            crypto.set_password(password)
+            return crypto.decrypt(extracted), None
+        except Exception:
+            return None, "Wrong password or corrupted data!"
+
+
+class Capacity:
+    @staticmethod
+    def check(image_path):
+        img = Image.open(image_path)
+        return max(0, (img.size[0] * img.size[1] * 3) // 8 - 32)
+
+
+def get_password_strength(pwd):
+    score = 0
+    if len(pwd) >= 8: score += 1
+    if len(pwd) >= 12: score += 1
+    if any(c.isupper() for c in pwd): score += 1
+    if any(c.isdigit() for c in pwd): score += 1
+    if any(c in "!@#$%^&*()_+-=[]{}|;':\",./<>?" for c in pwd): score += 1
+    labels = ["", "Very Weak", "Weak", "Fair", "Strong", "Very Strong"]
+    bar_colors = ["", "#ff4444", "#ff8800", "#ffaa00", "#88cc00", "#00ff88"]
+    return score, labels[score] if score else "Very Weak", bar_colors[score] if score else "#ff4444"
+
+
+class CryptoStegApp:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("CryptoSteg v3.0 — Military Grade Steganography")
+        self.root.geometry("1100x820")
+        self.root.resizable(True, True)
+        self.dark_mode = True
+        self.logger = ActivityLogger()
+
+        self.encode_image_path = None
+        self.decode_image_path = None
+        self.detect_image_path = None
+
+        self._setup_colors()
+        self._build_ui()
+
+    def _setup_colors(self):
+        if self.dark_mode:
+            self.C = {
+                'bg': '#1a1a2e', 'frame': '#16213e', 'input': '#0f3460',
+                'text': '#ffffff', 'sub': '#888888',
+                'accent': '#00ff88', 'danger': '#ff4444', 'warn': '#ffaa00',
+            }
+        else:
+            self.C = {
+                'bg': '#f4f4f4', 'frame': '#e0e0e0', 'input': '#ffffff',
+                'text': '#111111', 'sub': '#555555',
+                'accent': '#007755', 'danger': '#cc0000', 'warn': '#cc7700',
+            }
+
+    def _build_ui(self):
+        C = self.C
+        self.root.configure(bg=C['bg'])
+
+        # Title bar
+        top = tk.Frame(self.root, bg=C['bg'])
+        top.pack(fill='x', pady=10, padx=20)
+
+        tk.Label(top, text="CRYPTOSTEG v3.0", font=('Arial', 26, 'bold'),
+                 bg=C['bg'], fg=C['accent']).pack(side='left')
+
+        self.theme_btn = tk.Button(top,
+            text="☀️ Light Mode" if self.dark_mode else "🌙 Dark Mode",
+            command=self._toggle_theme, bg=C['input'], fg=C['text'], padx=12, pady=5,
+            relief='flat', cursor='hand2')
+        self.theme_btn.pack(side='right')
+
+        tk.Label(self.root,
+                 text="AES-256 Encryption  •  LSB Steganography  •  Steganalysis  •  Logging  •  PDF Reports",
+                 font=('Arial', 9), bg=C['bg'], fg=C['sub']).pack()
+
+        # Notebook
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure('TNotebook', background=C['bg'], borderwidth=0)
+        style.configure('TNotebook.Tab', background=C['frame'], foreground=C['text'],
+                        padding=[14, 6], font=('Arial', 10, 'bold'))
+        style.map('TNotebook.Tab', background=[('selected', C['input'])],
+                  foreground=[('selected', C['accent'])])
+
+        self.nb = ttk.Notebook(self.root)
+        self.nb.pack(fill='both', expand=True, padx=20, pady=8)
+
+        self.nb.add(self._encode_tab(), text="🔒  Encode")
+        self.nb.add(self._decode_tab(), text="🔓  Decode")
+        self.nb.add(self._detect_tab(), text="🕵️  Detect")
+        self.nb.add(self._logs_tab(), text="📋  Activity Log")
+
+        # Status bar
+        self.status = tk.Label(self.root, text="✅ CryptoSteg ready.", anchor='w',
+                               bg=C['frame'], fg=C['sub'], font=('Arial', 9), padx=10)
+        self.status.pack(fill='x', side='bottom')
+
+    def _encode_tab(self):
+        C = self.C
+        tab = tk.Frame(self.nb, bg=C['frame'])
+
+        img_frame = tk.LabelFrame(tab, text=" Step 1 · Select Cover Image ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        img_frame.pack(fill='x', padx=20, pady=(12, 6))
+
+        row = tk.Frame(img_frame, bg=C['frame'])
+        row.pack(fill='x', padx=10, pady=8)
+
+        self.enc_preview = tk.Label(row, text="No image selected\n(PNG / BMP / JPG)",
+                                    bg=C['input'], fg=C['sub'], width=22, height=7,
+                                    relief='flat')
+        self.enc_preview.pack(side='left', padx=(0, 12))
+
+        info_col = tk.Frame(row, bg=C['frame'])
+        info_col.pack(side='left', fill='both', expand=True)
+
+        tk.Button(info_col, text="📁  Browse Image", command=self._enc_browse,
+                  bg=C['input'], fg=C['text'], padx=14, pady=6,
+                  relief='flat', cursor='hand2').pack(anchor='w')
+
+        self.enc_cap_label = tk.Label(info_col, text="", bg=C['frame'], fg=C['warn'])
+        self.enc_cap_label.pack(anchor='w', pady=(6, 0))
+
+        self.enc_cap_bar = ttk.Progressbar(info_col, length=280, mode='determinate')
+        self.enc_cap_bar.pack(anchor='w', pady=(4, 0))
+
+        self.enc_cap_used = tk.Label(info_col, text="", bg=C['frame'], fg=C['sub'])
+        self.enc_cap_used.pack(anchor='w')
+
+        msg_frame = tk.LabelFrame(tab, text=" Step 2 · Enter Secret Message ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        msg_frame.pack(fill='both', expand=True, padx=20, pady=6)
+
+        self.enc_msg = scrolledtext.ScrolledText(msg_frame, height=5,
+                                                 bg=C['input'], fg=C['text'],
+                                                 insertbackground=C['text'], font=('Consolas', 10))
+        self.enc_msg.pack(fill='both', expand=True, padx=10, pady=(8, 2))
+        self.enc_msg.bind('<KeyRelease>', self._enc_on_type)
+
+        self.enc_char_label = tk.Label(msg_frame, text="Characters: 0",
+                                       bg=C['frame'], fg=C['sub'])
+        self.enc_char_label.pack(anchor='e', padx=12, pady=(0, 6))
+
+        pwd_frame = tk.LabelFrame(tab, text=" Step 3 · Set Password (AES-256) ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        pwd_frame.pack(fill='x', padx=20, pady=6)
+
+        pwd_row = tk.Frame(pwd_frame, bg=C['frame'])
+        pwd_row.pack(fill='x', padx=10, pady=8)
+
+        self.enc_pwd = tk.Entry(pwd_row, show="•", width=34, bg=C['input'],
+                                fg=C['text'], insertbackground=C['text'], font=('Arial', 11))
+        self.enc_pwd.pack(side='left')
+        self.enc_pwd.bind('<KeyRelease>', self._enc_pwd_changed)
+
+        self.enc_show_pwd = tk.Button(pwd_row, text="👁", command=self._enc_toggle_pwd,
+                                      bg=C['input'], fg=C['text'], padx=6, relief='flat')
+        self.enc_show_pwd.pack(side='left', padx=4)
+
+        self.enc_str_label = tk.Label(pwd_frame, text="", bg=C['frame'])
+        self.enc_str_label.pack(anchor='w', padx=12)
+        self.enc_str_bar = ttk.Progressbar(pwd_frame, length=260, mode='determinate')
+        self.enc_str_bar.pack(anchor='w', padx=12, pady=(2, 8))
+
+        self.enc_btn = tk.Button(tab, text="ENCODE & HIDE MESSAGE",
+                                 command=self._do_encode,
+                                 bg=C['accent'], fg='#0a0a0a',
+                                 font=('Arial', 12, 'bold'), padx=30, pady=10,
+                                 state='disabled', relief='flat', cursor='hand2')
+        self.enc_btn.pack(pady=12)
+
+        return tab
+
+    def _enc_browse(self):
+        path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.bmp *.jpg *.jpeg")])
+        if not path:
+            return
+        self.encode_image_path = path
+        img = Image.open(path)
+        img.thumbnail((160, 110))
+        photo = ImageTk.PhotoImage(img)
+        self.enc_preview.config(image=photo, text="")
+        self.enc_preview.image = photo
+        cap = Capacity.check(path)
+        self.enc_cap_label.config(text=f"📊 Max capacity: {cap:,} characters")
+        self._enc_update_cap_bar()
+        self._enc_check_ready()
+
+    def _enc_update_cap_bar(self):
+        if not self.encode_image_path:
+            return
+        cap = Capacity.check(self.encode_image_path)
+        msg_len = len(self.enc_msg.get("1.0", tk.END).strip())
+        pct = min(100, (msg_len / cap * 100)) if cap > 0 else 0
+        self.enc_cap_bar['value'] = pct
+        self.enc_cap_used.config(text=f"{msg_len} / {cap:,} characters used ({pct:.1f}%)")
+
+    def _enc_on_type(self, event=None):
+        msg = self.enc_msg.get("1.0", tk.END).strip()
+        self.enc_char_label.config(text=f"Characters: {len(msg)}")
+        self._enc_update_cap_bar()
+        self._enc_check_ready()
+
+    def _enc_pwd_changed(self, event=None):
+        pwd = self.enc_pwd.get()
+        score, label, color = get_password_strength(pwd)
+        self.enc_str_label.config(text=f"Strength: {label}", fg=color)
+        self.enc_str_bar['value'] = score * 20
+        self._enc_check_ready()
+
+    def _enc_toggle_pwd(self):
+        cur = self.enc_pwd.cget('show')
+        self.enc_pwd.config(show='' if cur == '•' else '•')
+
+    def _enc_check_ready(self):
+        ok = (self.encode_image_path and
+              self.enc_msg.get("1.0", tk.END).strip() and
+              self.enc_pwd.get())
+        self.enc_btn.config(state='normal' if ok else 'disabled')
+
+    def _do_encode(self):
+        msg = self.enc_msg.get("1.0", tk.END).strip()
+        pwd = self.enc_pwd.get()
+
+        if len(msg) > Capacity.check(self.encode_image_path):
+            messagebox.showerror("Error", "❌ Message too large for selected image!")
+            return
+
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".png", filetypes=[("PNG", "*.png")],
+            initialfile="stego_image.png")
+        if not save_path:
+            return
+
+        try:
+            bytes_hidden = Encoder().encode(self.encode_image_path, msg, pwd, save_path)
+
+            self.logger.add_log("ENCODE",
+                f"Image:{os.path.basename(self.encode_image_path)} → {os.path.basename(save_path)}, {bytes_hidden} bytes",
+                "SUCCESS")
+
+            report = PDFReporter.generate("ENCODE", {
+                "Input Image": os.path.basename(self.encode_image_path),
+                "Output Image": os.path.basename(save_path),
+                "Message Length": f"{len(msg)} characters",
+                "Bytes Hidden": f"{bytes_hidden} bytes",
+                "Encryption": "AES-256-CBC",
+            })
+
+            messagebox.showinfo("✅ Success!",
+                f"Message hidden successfully!\n\n"
+                f"📁 Output: {os.path.basename(save_path)}\n"
+                f"📊 Bytes hidden: {bytes_hidden}\n"
+                f"🔐 Encrypted with AES-256\n"
+                f"📄 Report saved: {report}")
+
+            self.enc_msg.delete("1.0", tk.END)
+            self.enc_pwd.delete(0, tk.END)
+            self.enc_preview.config(image='', text="No image selected\n(PNG / BMP / JPG)")
+            self.enc_preview.image = None
+            self.encode_image_path = None
+            self.enc_cap_label.config(text="")
+            self.enc_cap_bar['value'] = 0
+            self.enc_cap_used.config(text="")
+            self.enc_str_label.config(text="")
+            self.enc_str_bar['value'] = 0
+            self.enc_btn.config(state='disabled')
+            self.status.config(text=f"✅ Encode successful!")
+            self._refresh_logs()
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            self.logger.add_log("ENCODE", str(e), "FAILED")
+
+    def _decode_tab(self):
+        C = self.C
+        tab = tk.Frame(self.nb, bg=C['frame'])
+
+        img_frame = tk.LabelFrame(tab, text=" Step 1 · Select Stego-Image ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        img_frame.pack(fill='x', padx=20, pady=(12, 6))
+
+        self.dec_img_label = tk.Label(img_frame, text="No image selected",
+                                      bg=C['input'], fg=C['sub'], height=2)
+        self.dec_img_label.pack(fill='x', padx=10, pady=8)
+
+        tk.Button(img_frame, text="📁  Browse Stego-Image", command=self._dec_browse,
+                  bg=C['input'], fg=C['text'], padx=14, pady=6,
+                  relief='flat', cursor='hand2').pack(pady=(0, 8))
+
+        pwd_frame = tk.LabelFrame(tab, text=" Step 2 · Enter Password (AES-256) ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        pwd_frame.pack(fill='x', padx=20, pady=6)
+
+        pwd_row = tk.Frame(pwd_frame, bg=C['frame'])
+        pwd_row.pack(padx=10, pady=8)
+
+        self.dec_pwd = tk.Entry(pwd_row, show="•", width=34, bg=C['input'],
+                                fg=C['text'], insertbackground=C['text'], font=('Arial', 11))
+        self.dec_pwd.pack(side='left')
+        self.dec_pwd.bind('<KeyRelease>', self._dec_check_ready)
+
+        tk.Button(pwd_row, text="👁", command=self._dec_toggle_pwd,
+                  bg=C['input'], fg=C['text'], padx=6, relief='flat').pack(side='left', padx=4)
+
+        self.dec_btn = tk.Button(tab, text="🔓  DECODE & EXTRACT MESSAGE",
+                                 command=self._do_decode,
+                                 bg=C['danger'], fg='#ffffff',
+                                 font=('Arial', 12, 'bold'), padx=30, pady=10,
+                                 state='disabled', relief='flat', cursor='hand2')
+        self.dec_btn.pack(pady=10)
+
+        out_frame = tk.LabelFrame(tab, text=" Extracted Message ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        out_frame.pack(fill='both', expand=True, padx=20, pady=6)
+
+        self.dec_output = scrolledtext.ScrolledText(out_frame, height=10,
+                                                    bg=C['input'], fg=C['accent'],
+                                                    font=('Consolas', 11))
+        self.dec_output.pack(fill='both', expand=True, padx=10, pady=(8, 4))
+
+        tk.Button(out_frame, text="📋  Copy to Clipboard", command=self._dec_copy,
+                  bg=C['input'], fg=C['text'], padx=12, pady=4,
+                  relief='flat', cursor='hand2').pack(anchor='e', padx=10, pady=(0, 8))
+
+        return tab
+
+    def _dec_browse(self):
+        path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.bmp")])
+        if path:
+            self.decode_image_path = path
+            self.dec_img_label.config(text=f"📷  {os.path.basename(path)}", fg=self.C['text'])
+            self._dec_check_ready()
+
+    def _dec_toggle_pwd(self):
+        cur = self.dec_pwd.cget('show')
+        self.dec_pwd.config(show='' if cur == '•' else '•')
+
+    def _dec_check_ready(self, event=None):
+        ok = self.decode_image_path and self.dec_pwd.get()
+        self.dec_btn.config(state='normal' if ok else 'disabled')
+
+    def _do_decode(self):
+        pwd = self.dec_pwd.get()
+        msg, error = Decoder().decode(self.decode_image_path, pwd)
+
+        if msg:
+            self.dec_output.delete("1.0", tk.END)
+            self.dec_output.insert("1.0", msg)
+            self.logger.add_log("DECODE",
+                f"Image:{os.path.basename(self.decode_image_path)}, Len:{len(msg)}", "SUCCESS")
+            PDFReporter.generate("DECODE", {
+                "Image": os.path.basename(self.decode_image_path),
+                "Message Length": f"{len(msg)} characters",
+            })
+            messagebox.showinfo("✅ Success!", "Message extracted and decrypted successfully!")
+            self.status.config(text="✅ Decode successful!")
+        else:
+            messagebox.showerror("❌ Failed", error)
+            self.logger.add_log("DECODE",
+                f"Image:{os.path.basename(self.decode_image_path)}", f"FAILED: {error}")
+
+        self._refresh_logs()
+
+    def _dec_copy(self):
+        text = self.dec_output.get("1.0", tk.END).strip()
+        if text:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.status.config(text="📋 Message copied to clipboard!")
+        else:
+            messagebox.showwarning("Empty", "Nothing to copy!")
+
+    def _detect_tab(self):
+        C = self.C
+        tab = tk.Frame(self.nb, bg=C['frame'])
+
+        img_frame = tk.LabelFrame(tab, text=" Select Image for Steganalysis ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        img_frame.pack(fill='x', padx=20, pady=(12, 6))
+
+        self.det_img_label = tk.Label(img_frame, text="No image selected",
+                                      bg=C['input'], fg=C['sub'], height=2)
+        self.det_img_label.pack(fill='x', padx=10, pady=8)
+
+        tk.Button(img_frame, text="📁  Browse Image", command=self._det_browse,
+                  bg=C['input'], fg=C['text'], padx=14, pady=6,
+                  relief='flat', cursor='hand2').pack(pady=(0, 8))
+
+        self.det_btn = tk.Button(tab, text="🔍  RUN STEGANALYSIS",
+                                 command=self._do_detect,
+                                 bg=C['warn'], fg='#0a0a0a',
+                                 font=('Arial', 12, 'bold'), padx=30, pady=10,
+                                 state='disabled', relief='flat', cursor='hand2')
+        self.det_btn.pack(pady=10)
+
+        res_frame = tk.LabelFrame(tab, text=" Analysis Results ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        res_frame.pack(fill='both', expand=True, padx=20, pady=6)
+
+        self.det_results = scrolledtext.ScrolledText(res_frame, height=14,
+                                                     bg=C['input'], fg=C['text'],
+                                                     font=('Consolas', 10))
+        self.det_results.pack(fill='both', expand=True, padx=10, pady=10)
+        self.det_results.insert("1.0", "🔍 Select an image and click 'RUN STEGANALYSIS' to begin...\n")
+
+        return tab
+
+    def _det_browse(self):
+        path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.bmp *.jpg *.jpeg")])
+        if path:
+            self.detect_image_path = path
+            self.det_img_label.config(text=f"📷  {os.path.basename(path)}", fg=self.C['text'])
+            self.det_btn.config(state='normal')
+
+    def _do_detect(self):
+        if not self.detect_image_path:
+            messagebox.showerror("Error", "Please select an image first!")
+            return
+        
+        try:
+            results = StegDetector.analyze(self.detect_image_path)
+            self.det_results.delete("1.0", tk.END)
+
+            sep = "═" * 58
+            out = f"{sep}\n  🔍  STEGANALYSIS REPORT — CryptoSteg v3.0\n{sep}\n\n"
+            out += f"  📁  File : {os.path.basename(self.detect_image_path)}\n"
+            out += f"  🕐  Time : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            out += f"  📊  LSB Distribution (first 10,000 pixels per channel):\n"
+            
+            for ch, d in results['lsb_distribution'].items():
+                out += f"      {ch:5s} → Ones: {d['ones']:5d}  Zeros: {d['zeros']:5d}  Ratio: {d['ratio']:.4f}\n"
+
+            out += f"\n  🎯  Suspicion Score : {results['confidence']:.1f}%\n\n"
+            
+            if results['has_hidden_data']:
+                out += f"  ⚠️  VERDICT: HIGH probability of hidden data detected!\n"
+                out += f"      Forensic analysis recommended.\n"
+            else:
+                out += f"  ✅  VERDICT: LOW probability of hidden data.\n"
+                out += f"      Image appears clean.\n"
+            
+            out += f"\n{sep}\n"
+            
+            if results['details']:
+                out += "\n  📋  Anomalies:\n"
+                for d in results['details']:
+                    out += f"      {d}\n"
+
+            self.det_results.insert("1.0", out)
+            self.logger.add_log("DETECT",
+                f"Image:{os.path.basename(self.detect_image_path)}, Score:{results['confidence']:.1f}%",
+                "COMPLETED")
+            self.status.config(text=f"🔍 Steganalysis complete. Score: {results['confidence']:.1f}%")
+            self._refresh_logs()
+            
+            messagebox.showinfo("Analysis Complete", f"Results displayed!\nConfidence Score: {results['confidence']:.1f}%")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Analysis failed: {str(e)}")
+            self.det_results.insert("1.0", f"❌ ERROR: {str(e)}\n\nCheck that the image file is valid.")
+
+    def _logs_tab(self):
+        C = self.C
+        tab = tk.Frame(self.nb, bg=C['frame'])
+
+        ctrl = tk.Frame(tab, bg=C['frame'])
+        ctrl.pack(fill='x', padx=20, pady=10)
+
+        tk.Button(ctrl, text="🔄  Refresh", command=self._refresh_logs,
+                  bg=C['input'], fg=C['text'], padx=12, pady=6,
+                  relief='flat', cursor='hand2').pack(side='left', padx=4)
+
+        tk.Button(ctrl, text="📄  Export PDF", command=self._export_logs_pdf,
+                  bg=C['accent'], fg='#0a0a0a', padx=12, pady=6,
+                  relief='flat', cursor='hand2').pack(side='left', padx=4)
+
+        tk.Button(ctrl, text="🗑️  Clear Logs", command=self._clear_logs,
+                  bg=C['danger'], fg='#ffffff', padx=12, pady=6,
+                  relief='flat', cursor='hand2').pack(side='left', padx=4)
+
+        log_frame = tk.LabelFrame(tab, text=" Activity History ",
+                                  bg=C['frame'], fg=C['accent'], font=('Arial', 10, 'bold'))
+        log_frame.pack(fill='both', expand=True, padx=20, pady=6)
+
+        self.logs_text = scrolledtext.ScrolledText(log_frame, height=22,
+                                                   bg=C['input'], fg=C['text'],
+                                                   font=('Consolas', 9))
+        self.logs_text.pack(fill='both', expand=True, padx=10, pady=10)
+
+        self._refresh_logs()
+        return tab
+
+    def _refresh_logs(self):
+        self.logs_text.delete("1.0", tk.END)
+        logs = self.logger.get_logs()
+        if not logs:
+            self.logs_text.insert("1.0", "  No activity logs yet.\n")
+            return
+        for log in reversed(logs[-100:]):
+            line = f"[{log['timestamp']}]  {log['action']:<10} {log['status']:<12} {log['details']}\n"
+            self.logs_text.insert(tk.END, line)
+
+    def _export_logs_pdf(self):
+        logs = self.logger.get_logs()
+        if not logs:
+            messagebox.showwarning("Empty", "No logs to export!")
+            return
+        path = filedialog.asksaveasfilename(defaultextension=".pdf",
+                                            filetypes=[("PDF", "*.pdf")],
+                                            initialfile="cryptosteg_logs.pdf")
+        if path:
+            PDFReporter.generate("ACTIVITY LOGS",
+                                 {"Total Entries": str(len(logs))}, path)
+            messagebox.showinfo("✅ Done", f"Logs exported to:\n{path}")
+
+    def _clear_logs(self):
+        if messagebox.askyesno("Confirm", "Clear all activity logs?"):
+            self.logger.clear_logs()
+            self._refresh_logs()
+            messagebox.showinfo("Done", "✅ Logs cleared!")
+
+    def _toggle_theme(self):
+        self.dark_mode = not self.dark_mode
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        self._setup_colors()
+        self._build_ui()
+
+    def run(self):
+        self.root.mainloop()
+
+if __name__ == "__main__":
+    print("""
+╔══════════════════════════════════════════════════════╗
+║   🔐 CryptoSteg v3.0 — Ultimate Steganography Tool  ║
+║   AES-256 · LSB · Steganalysis · Logging · Reports  ║
+╚══════════════════════════════════════════════════════╝
+    """)
+    app = CryptoStegApp()
+    app.run()

@@ -28,5 +28,23 @@
     "action": "DECODE",
     "details": "Image:stego_image_i_hate_you.png, Len:10",
     "status": "SUCCESS"
+  },
+  {
+    "timestamp": "2026-05-15 23:45:27",
+    "action": "ENCODE",
+    "details": "Image:yellow-alert.png \u2192 stego_image_rock.png, 48 bytes",
+    "status": "SUCCESS"
+  },
+  {
+    "timestamp": "2026-05-15 23:45:47",
+    "action": "DECODE",
+    "details": "Image:stego_image_rock.png, Len:27",
+    "status": "SUCCESS"
+  },
+  {
+    "timestamp": "2026-05-15 23:45:59",
+    "action": "DETECT",
+    "details": "Image:stego_image_rock.png, Score:95.0%",
+    "status": "COMPLETED"
   }
 ]
